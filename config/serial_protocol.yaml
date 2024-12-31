@@ -1,0 +1,10 @@
+static_commands:
+  - param: request
+    data: [0x01, 0x03, 0x00, 0x00, 0x00, 0x02]
+    variables: { 0: 'device_addr' }
+    base_addr: 0x00
+    absolute_base: false
+feedbacks:
+  - param: state
+    base_addr: 0x00
+    absolute_base: false  
