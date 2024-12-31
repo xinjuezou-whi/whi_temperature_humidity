@@ -32,9 +32,8 @@ namespace whi_temperature_humidity
         sensor_ = std::make_shared<SensorSerial>(node_handle_);
         sensor_->parseProtocol(protocolConfig);
 
-        node_handle_->param("loop_time", loop_time_, 10.0);
-        ROS_INFO("loop_time is %f",loop_time_);
-        ros::Duration updateFreq = ros::Duration(loop_time_);
+        node_handle_->param("loop_duration", loop_duration_, 10.0);
+        ros::Duration updateFreq = ros::Duration(loop_duration_);
         non_realtime_loop_ = std::make_unique<ros::Timer>(node_handle_->createTimer(updateFreq,
             std::bind(&TemperatureHumidity::update, this, std::placeholders::_1)));
         pub_temp_hum_ = std::make_unique<ros::Publisher>(

@@ -1,4 +1,4 @@
-loop_time: 4
+loop_duration: 4 # second
 protocol_config: /home/nvidia/catkin_workspace/src/whi_temperature_humidity/config/serial_protocol.yaml
 port: /dev/ttyUART_485_2
 baudrate: 4800   

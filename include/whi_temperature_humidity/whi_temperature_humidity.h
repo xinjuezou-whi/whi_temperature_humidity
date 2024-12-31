@@ -42,7 +42,7 @@ namespace whi_temperature_humidity
         std::shared_ptr<ros::NodeHandle> node_handle_{ nullptr };
         std::unique_ptr<ros::Timer> non_realtime_loop_{ nullptr };
         ros::Duration elapsed_time_;
-        double loop_time_{ 10.0 };
+        double loop_duration_{ 10.0 };
         std::shared_ptr<SensorBase> sensor_{ nullptr };
         std::unique_ptr<ros::Publisher> pub_temp_hum_{ nullptr };
         std::unique_ptr<ros::ServiceServer> service_{ nullptr };          
