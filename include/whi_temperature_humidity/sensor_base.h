@@ -31,7 +31,8 @@ namespace whi_temperature_humidity
 
     public:
         virtual void parseProtocol(const std::string& ProtocolConfig) = 0;
-        virtual bool getValues(double& Temperature, double& Humidity) = 0;
+        virtual bool getValues(double& Temperature, double& Humidity, std::string Param) = 0;
+        virtual bool getServiceValues(std::vector<double> & valuesVec, std::string Param) = 0;
 
     protected:
         std::shared_ptr<ros::NodeHandle> node_handle_{ nullptr };

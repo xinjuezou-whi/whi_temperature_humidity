@@ -82,7 +82,9 @@ namespace whi_temperature_humidity
                 << static_cast<int>(vec[i]);
         }
         std::string result = oss.str();
-        //ROS_INFO("send data is : %s",result.c_str());
+#ifdef DEBUG
+        ROS_INFO("send data is : %s",result.c_str());
+#endif
         return 0;
     }
 
@@ -116,13 +118,15 @@ namespace whi_temperature_humidity
         node_handle_->param("baudrate", baudrate_, 9600);
         int device;
         node_handle_->param("device_addr", device, 1);
-        device_addr_ = uint16_t(device);
 
         // serial
 	    try
 	    {
 		    serial_inst_ = std::make_unique<serial::Serial>(serial_port_, baudrate_, serial::Timeout::simpleTimeout(500));
             ROS_INFO_STREAM("init,  device:" << serial_port_);
+            values_map_[0x01].push_back(0.0);
+            values_map_[0x01].push_back(0.0);
+            values_map_[0x02].push_back(0.0);
 	    }
 	    catch (serial::IOException& e)
 	    {
@@ -138,9 +142,8 @@ namespace whi_temperature_humidity
         protocol_->parseProtocol(ProtocolConfig);
     }
 
-    bool SensorSerial::getValues(double& Temperature, double& Humidity)
+    bool SensorSerial::getValues(double& Temperature_noise, double& Humidity, std::string Param)
     {
-        std::string Param = "request";
         std::vector<uint8_t> data;
         bool result = false;
         if (protocol_->static_commands_map_)
@@ -150,8 +153,8 @@ namespace whi_temperature_humidity
                 ROS_INFO_STREAM("request param is not exist, param: " << Param);
                 return false;
             }
-
             data = protocol_->static_commands_map_->at(Param).data_;
+            addr_ = data[0];
             uint16_t crc = crc16(data.data(), data.size());
             data.push_back(crc);
             data.push_back(uint8_t(crc >> 8));
@@ -177,7 +180,7 @@ namespace whi_temperature_humidity
                     {
                         unsigned char rbuff[count];
                         size_t readNum = serial_inst_->read(rbuff, count);
-                        if (count > 2)
+                        if (count > 2 && addr_ == rbuff[0])
                         {
                             uint16_t crc = crc16(rbuff, readNum - 2);
                             uint16_t readCrc = rbuff[readNum - 2] | uint16_t(rbuff[readNum - 1] << 8);
@@ -201,17 +204,34 @@ namespace whi_temperature_humidity
                                 std::string getstr = oss.str();     
                                 ROS_INFO("getstr is %s",getstr.c_str());
 #endif
-
-                                uint16_t tempI, humidityI;
-                                tempI = (rbuff[5] << 8) | rbuff[6];
-                                humidityI = (rbuff[3] << 8) | rbuff[4];
-                                auto tempBin = decimalToBinary2(tempI);
-                                int gettemp = complementToDecimal(tempBin);
-                                auto humidityBin = decimalToBinary2(humidityI);
-                                int gethumidity = complementToDecimal(humidityBin);
-                                Temperature = float(gettemp) / 10.0;
-                                Humidity = float(gethumidity) / 10.0;
-                                result = true;
+                                values_map_[addr_].clear();
+                                //values_map_[addr_].resize(2);
+                                if (rbuff[0] == 0x01)
+                                {
+                                    uint16_t tempI, humidityI;
+                                    tempI = (rbuff[5] << 8) | rbuff[6];
+                                    humidityI = (rbuff[3] << 8) | rbuff[4];
+                                    auto tempBin = decimalToBinary2(tempI);
+                                    int gettemp = complementToDecimal(tempBin);
+                                    auto humidityBin = decimalToBinary2(humidityI);
+                                    int gethumidity = complementToDecimal(humidityBin);
+                                    Temperature_noise = float(gettemp) / 10.0;
+                                    Humidity = float(gethumidity) / 10.0;
+                                    temp_noise_ = Temperature_noise;
+                                    humidity_ = Humidity;
+                                    result = true;
+                                    values_map_[addr_].push_back(temp_noise_);
+                                    values_map_[addr_].push_back(humidity_);
+                                }
+                                else if (rbuff[0] == 0x02)
+                                {
+                                    int16_t noiseI;
+                                    noiseI = (rbuff[3] << 8) | rbuff[4];
+                                    Temperature_noise = float(noiseI) / 10.0;
+                                    temp_noise_ = Temperature_noise;
+                                    values_map_[addr_].push_back(temp_noise_);
+                                    result = true;
+                                }
                             }
                         }
                     }
@@ -224,4 +244,22 @@ namespace whi_temperature_humidity
 
         return result;
     }
+
+    bool SensorSerial::getServiceValues(std::vector<double> & valuesVec, std::string Param)
+    {
+        if (Param == "temp")
+        {
+            uint8_t addr = 0x01;
+            valuesVec[0] = values_map_[addr][0];
+            valuesVec[1] = values_map_[addr][1];
+        }
+        else if (Param == "noise")
+        {
+            uint8_t addr = 0x02;
+            valuesVec[0] = values_map_[addr][0];
+        }
+
+        return true;
+    }
+
 } // namespace whi_temperature_humidity

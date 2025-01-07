@@ -33,7 +33,8 @@ namespace whi_temperature_humidity
 
     public:
         void parseProtocol(const std::string& ProtocolConfig) override;
-        bool getValues(double& Temperature, double& Humidity) override;
+        bool getValues(double& Temperature, double& Humidity, std::string Param) override;
+        bool getServiceValues(std::vector<double> & valuesVec, std::string Param) override;
 
     protected:
         void init();
@@ -43,7 +44,10 @@ namespace whi_temperature_humidity
         std::unique_ptr<Protocol> protocol_{ nullptr };
 	    std::string serial_port_;
 	    int baudrate_{ 4800 };
-        std::uint16_t device_addr_{ 0x01 };
         std::unique_ptr<serial::Serial> serial_inst_{ nullptr };
+        double temp_noise_{ 0.0 };
+        double humidity_{ 0.0 };
+        std::map<uint8_t, std::vector<double>> values_map_;
+        uint8_t addr_{ 0x01 };
 	};
 } // namespace whi_indicators

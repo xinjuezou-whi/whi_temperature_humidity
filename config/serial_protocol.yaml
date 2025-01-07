@@ -1,6 +1,16 @@
 static_commands:
-  - param: request
+  - param: request_temp
     data: [0x01, 0x03, 0x00, 0x00, 0x00, 0x02]
+    variables: { 0: 'device_addr' }
+    base_addr: 0x00
+    absolute_base: false
+  - param: request_noise
+    data: [0x02, 0x03, 0x00, 0x00, 0x00, 0x01]
+    variables: { 0: 'device_addr' }
+    base_addr: 0x00
+    absolute_base: false
+  - param: set
+    data: [0x01, 0x06, 0x07, 0xd1, 0x00, 0x02]
     variables: { 0: 'device_addr' }
     base_addr: 0x00
     absolute_base: false
