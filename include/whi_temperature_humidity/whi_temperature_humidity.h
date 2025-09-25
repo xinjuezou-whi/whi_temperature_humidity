@@ -16,11 +16,11 @@ Changelog:
 ******************************************************************/
 #pragma once
 #include "sensor_base.h"
-#include <whi_interfaces/WhiTemperatureHumidity.h>
-#include <whi_interfaces/WhiSrvTemperatureHumidity.h>
-#include <whi_interfaces/WhiNoise.h>
-#include <whi_interfaces/WhiSrvNoise.h>
-#include <ros/ros.h>
+#include <whi_interfaces/msg/whi_temperature_humidity.hpp>
+#include <whi_interfaces/srv/whi_srv_temperature_humidity.hpp>
+#include <whi_interfaces/msg/whi_decibel.hpp>
+#include <whi_interfaces/srv/whi_srv_decibel.hpp>
+#include <rclcpp/rclcpp.hpp>
 
 #include <memory>
 #include <map>
@@ -31,29 +31,33 @@ namespace whi_temperature_humidity
 	class TemperatureHumidity
 	{
     public:
-        TemperatureHumidity(std::shared_ptr<ros::NodeHandle>& NodeHandle);
+        TemperatureHumidity(std::shared_ptr<rclcpp::Node>& NodeHandle);
         ~TemperatureHumidity() = default;
 
     protected:
         void init();
-        void update(const ros::TimerEvent & Event);
-        void update_noise(const ros::TimerEvent & Event);
-        bool onService(whi_interfaces::WhiSrvTemperatureHumidity::Request& Request,
-                whi_interfaces::WhiSrvTemperatureHumidity::Response& Response);         
-        bool onServiceNoise(whi_interfaces::WhiSrvNoise::Request& Request,
-                whi_interfaces::WhiSrvNoise::Response& Response);
+        void update();
+        void update_decibel();
+        void onService(const std::shared_ptr<whi_interfaces::srv::WhiSrvTemperatureHumidity::Request> Request,
+                std::shared_ptr<whi_interfaces::srv::WhiSrvTemperatureHumidity::Response> Response);
+                
+        void onServiceDecibel(const std::shared_ptr<whi_interfaces::srv::WhiSrvDecibel::Request> Request,
+                std::shared_ptr<whi_interfaces::srv::WhiSrvDecibel::Response> Response);
+
     protected:
-        std::shared_ptr<ros::NodeHandle> node_handle_{ nullptr };
-        std::unique_ptr<ros::Timer> non_temp_loop_{ nullptr };
-        std::unique_ptr<ros::Timer> non_noise_loop_{ nullptr };
-        ros::Duration elapsed_time_;
+        std::shared_ptr<rclcpp::Node> node_handle_{ nullptr };
+        std::shared_ptr<rclcpp::TimerBase> non_temp_loop_{ nullptr };
+        std::shared_ptr<rclcpp::TimerBase> non_decibel_loop_{ nullptr };
+        rclcpp::Duration elapsed_time_;
         double loop_duration_{ 10.0 };
-        double loop_duration_noise_{ 10.0 };
+        double loop_duration_decibel_{ 10.0 };
         std::shared_ptr<SensorBase> sensor_{ nullptr };
-        std::unique_ptr<ros::Publisher> pub_temp_hum_{ nullptr };
-        std::unique_ptr<ros::ServiceServer> service_{ nullptr };   
-        std::unique_ptr<ros::Publisher> pub_noise_hum_{ nullptr };   
-        std::unique_ptr<ros::ServiceServer> service_noise_{ nullptr };   
+        std::shared_ptr<rclcpp::Publisher<whi_interfaces::msg::WhiTemperatureHumidity>> pub_temp_hum_{ nullptr };
+        std::shared_ptr<rclcpp::Service<whi_interfaces::srv::WhiSrvTemperatureHumidity>> service_{ nullptr };
+           
+        std::shared_ptr<rclcpp::Publisher<whi_interfaces::msg::WhiDecibel>> pub_decibel_hum_{ nullptr };
+        std::shared_ptr<rclcpp::Service<whi_interfaces::srv::WhiSrvDecibel>> service_decibel_{ nullptr };
+           
         std::mutex mutex_;
 	};
 } // namespace whi_get_temp

@@ -83,7 +83,9 @@ namespace whi_temperature_humidity
         }
         std::string result = oss.str();
 #ifdef DEBUG
-        ROS_INFO("send data is : %s",result.c_str());
+        // 注意：这里需要一个有效的node_handle指针，建议在类方法中调用
+        // RCLCPP_INFO(node_handle_->get_logger(), "send data is : %s", result.c_str());
+        std::cout << "send data is : " << result << std::endl;
 #endif
         return 0;
     }
@@ -97,7 +99,7 @@ namespace whi_temperature_humidity
         return static_cast<char>(value);
     }
 
-    SensorSerial::SensorSerial(std::shared_ptr<ros::NodeHandle> NodeHandle)
+    SensorSerial::SensorSerial(std::shared_ptr<rclcpp::Node> NodeHandle)
         : SensorBase(NodeHandle)
     {
         init();
@@ -114,35 +116,40 @@ namespace whi_temperature_humidity
     void SensorSerial::init()
     {
         // params
-        node_handle_->param("port", serial_port_, std::string("/dev/ttyUSB0"));
-        node_handle_->param("baudrate", baudrate_, 9600);
+        node_handle_->declare_parameter("port", std::string("/dev/ttyUSB0"));
+        node_handle_->declare_parameter("baudrate", 9600);
+        node_handle_->declare_parameter("device_addr", 1);
+        
+        node_handle_->get_parameter("port", serial_port_);
+        node_handle_->get_parameter("baudrate", baudrate_);
         int device;
-        node_handle_->param("device_addr", device, 1);
+        node_handle_->get_parameter("device_addr", device);
 
         // serial
 	    try
 	    {
 		    serial_inst_ = std::make_unique<serial::Serial>(serial_port_, baudrate_, serial::Timeout::simpleTimeout(500));
-            ROS_INFO_STREAM("init,  device:" << serial_port_);
+            RCLCPP_INFO_STREAM(node_handle_->get_logger(), "init,  device: " << serial_port_);
             values_map_[0x01].push_back(0.0);
             values_map_[0x01].push_back(0.0);
+            values_map_[0x01].push_back(0.0); // pm25
             values_map_[0x02].push_back(0.0);
 	    }
 	    catch (serial::IOException& e)
 	    {
-		    ROS_FATAL_STREAM("failed to open serial " << serial_port_);
+		    RCLCPP_FATAL_STREAM(node_handle_->get_logger(), "failed to open serial " << serial_port_);
 	    }
 
     }
 
     void SensorSerial::parseProtocol(const std::string& ProtocolConfig)
     {
-        ROS_INFO("parsing prototocol");
+        RCLCPP_INFO(node_handle_->get_logger(), "parsing prototocol");
         protocol_ = std::make_unique<Protocol>();
         protocol_->parseProtocol(ProtocolConfig);
     }
 
-    bool SensorSerial::getValues(double& Temperature_noise, double& Humidity, std::string Param)
+    bool SensorSerial::getValues(double& Temperature, double& Humidity, double& Pm25, std::string Param)
     {
         std::vector<uint8_t> data;
         bool result = false;
@@ -150,7 +157,7 @@ namespace whi_temperature_humidity
         {
             if (auto cmd_iter = protocol_->static_commands_map_->find(Param); cmd_iter == protocol_->static_commands_map_->end())
             {
-                ROS_INFO_STREAM("request param is not exist, param: " << Param);
+                RCLCPP_INFO_STREAM(node_handle_->get_logger(), "request param is not exist, param: " << Param);
                 return false;
             }
             data = protocol_->static_commands_map_->at(Param).data_;
@@ -180,7 +187,7 @@ namespace whi_temperature_humidity
                     {
                         unsigned char rbuff[count];
                         size_t readNum = serial_inst_->read(rbuff, count);
-                        if (count > 2 && addr_ == rbuff[0])
+                        if (count > 2 && addr_ == rbuff[0] && readNum >= 19)
                         {
                             uint16_t crc = crc16(rbuff, readNum - 2);
                             uint16_t readCrc = rbuff[readNum - 2] | uint16_t(rbuff[readNum - 1] << 8);
@@ -188,7 +195,7 @@ namespace whi_temperature_humidity
                             {
                                 std::ostringstream oss;
                                 // 遍历vector并以16进制格式添加到sstream中
-                                for (size_t i = 0; i < count; ++i)
+                                for (size_t i = 0; i < readNum; ++i)
                                 {
                                     if (i != 0)
                                     {
@@ -202,34 +209,41 @@ namespace whi_temperature_humidity
                                 }
 #ifdef DEBUG
                                 std::string getstr = oss.str();     
-                                ROS_INFO("getstr is %s",getstr.c_str());
+                                RCLCPP_INFO(node_handle_->get_logger(), "getstr is %s", getstr.c_str());
 #endif
                                 values_map_[addr_].clear();
                                 //values_map_[addr_].resize(2);
-                                if (rbuff[0] == 0x01)
+                                if (rbuff[0] == addr_)
                                 {
-                                    uint16_t tempI, humidityI;
-                                    tempI = (rbuff[5] << 8) | rbuff[6];
-                                    humidityI = (rbuff[3] << 8) | rbuff[4];
+                                    uint16_t tempI, humidityI, pm25I;
+                                    tempI = (rbuff[3] << 8) | rbuff[4];
+                                    humidityI = (rbuff[5] << 8) | rbuff[6];
+                                    pm25I = (rbuff[17] << 8) | rbuff[18];  // PM2.5在第17-18字节
                                     auto tempBin = decimalToBinary2(tempI);
                                     int gettemp = complementToDecimal(tempBin);
                                     auto humidityBin = decimalToBinary2(humidityI);
                                     int gethumidity = complementToDecimal(humidityBin);
-                                    Temperature_noise = float(gettemp) / 10.0;
-                                    Humidity = float(gethumidity) / 10.0;
-                                    temp_noise_ = Temperature_noise;
+                                    // PM2.5数据转换：根据手册，PM2.5直接使用寄存器值，单位ug/m3
+                                    auto pm25Bin = decimalToBinary2(pm25I);
+                                    int getPm25 = complementToDecimal(pm25Bin);
+                                    Temperature = float(gettemp - 2000) / 100.0;
+                                    Humidity = float(gethumidity) / 100.0;
+                                    Pm25 = float(getPm25);  // PM2.5直接使用，单位ug/m3
+                                    temp_decibel_ = Temperature;
                                     humidity_ = Humidity;
+                                    pm25_ = Pm25;  // 需要在头文件中添加pm25_成员变量
                                     result = true;
-                                    values_map_[addr_].push_back(temp_noise_);
+                                    values_map_[addr_].push_back(temp_decibel_);
                                     values_map_[addr_].push_back(humidity_);
+                                    values_map_[addr_].push_back(pm25_);  // 添加PM2.5到values_map_
                                 }
                                 else if (rbuff[0] == 0x02)
                                 {
                                     int16_t noiseI;
                                     noiseI = (rbuff[3] << 8) | rbuff[4];
-                                    Temperature_noise = float(noiseI) / 10.0;
-                                    temp_noise_ = Temperature_noise;
-                                    values_map_[addr_].push_back(temp_noise_);
+                                    Temperature = float(noiseI) / 10.0;
+                                    temp_decibel_ = Temperature;
+                                    values_map_[addr_].push_back(temp_decibel_);
                                     result = true;
                                 }
                             }
@@ -252,6 +266,7 @@ namespace whi_temperature_humidity
             uint8_t addr = 0x01;
             valuesVec[0] = values_map_[addr][0];
             valuesVec[1] = values_map_[addr][1];
+            valuesVec[2] = values_map_[addr][2];
         }
         else if (Param == "noise")
         {

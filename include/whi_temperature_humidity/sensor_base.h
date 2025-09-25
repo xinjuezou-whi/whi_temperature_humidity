@@ -15,7 +15,7 @@ Changelog:
 2025-xx-xx: xxx
 ******************************************************************/
 #pragma once
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 
 #include <memory>
 
@@ -25,16 +25,16 @@ namespace whi_temperature_humidity
 	{
     public:
         SensorBase() = delete;
-        SensorBase(std::shared_ptr<ros::NodeHandle> NodeHandle)
+        SensorBase(std::shared_ptr<rclcpp::Node> NodeHandle)
             : node_handle_(NodeHandle){};
         virtual ~SensorBase() = default;
 
     public:
         virtual void parseProtocol(const std::string& ProtocolConfig) = 0;
-        virtual bool getValues(double& Temperature, double& Humidity, std::string Param) = 0;
+        virtual bool getValues(double& Temperature, double& Humidity, double& Pm25, std::string Param) = 0;
         virtual bool getServiceValues(std::vector<double> & valuesVec, std::string Param) = 0;
 
     protected:
-        std::shared_ptr<ros::NodeHandle> node_handle_{ nullptr };
+        std::shared_ptr<rclcpp::Node> node_handle_{ nullptr };
 	};
 } // namespace whi_temperature_humidity

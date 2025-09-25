@@ -13,12 +13,12 @@ All text above must be included in any redistribution.
 ******************************************************************/
 #include "whi_temperature_humidity/whi_temperature_humidity.h"
 #include "whi_temperature_humidity/sensor_serial.h"
-#include <whi_interfaces/WhiTemperatureHumidity.h>
+#include <whi_interfaces/msg/whi_temperature_humidity.hpp>
 
 namespace whi_temperature_humidity
 {
-    TemperatureHumidity::TemperatureHumidity(std::shared_ptr<ros::NodeHandle>& NodeHandle)
-        : node_handle_(NodeHandle)
+    TemperatureHumidity::TemperatureHumidity(std::shared_ptr<rclcpp::Node>& NodeHandle)
+        : node_handle_(NodeHandle), elapsed_time_(rclcpp::Duration(0, 0))
     {
         init();
     }
@@ -27,106 +27,120 @@ namespace whi_temperature_humidity
     {
         /// params
         std::string protocolConfig;
-        node_handle_->param("protocol_config", protocolConfig, std::string());
-        ROS_INFO("protocol_config is %s",protocolConfig.c_str());
+        node_handle_->declare_parameter("protocol_config", std::string());
+        node_handle_->get_parameter("protocol_config", protocolConfig);
+        RCLCPP_INFO(node_handle_->get_logger(), "protocol_config is %s", protocolConfig.c_str());
         sensor_ = std::make_shared<SensorSerial>(node_handle_);
         sensor_->parseProtocol(protocolConfig);
 
-        node_handle_->param("loop_duration_temp", loop_duration_, 10.0);
-        node_handle_->param("loop_duration_noise", loop_duration_noise_, 10.0);
-        ros::Duration updateFreq = ros::Duration(loop_duration_);
-        ros::Duration updateFreq_noise = ros::Duration(loop_duration_noise_);
-        non_temp_loop_ = std::make_unique<ros::Timer>(node_handle_->createTimer(updateFreq,
-            std::bind(&TemperatureHumidity::update, this, std::placeholders::_1)));
-        non_noise_loop_ = std::make_unique<ros::Timer>(node_handle_->createTimer(updateFreq_noise,
-            std::bind(&TemperatureHumidity::update_noise, this, std::placeholders::_1)));
-        pub_temp_hum_ = std::make_unique<ros::Publisher>(
-            node_handle_->advertise<whi_interfaces::WhiTemperatureHumidity>("temperature_humidity", 1));
-        service_ = std::make_unique<ros::ServiceServer>(
-            node_handle_->advertiseService("temperature_humidity", &TemperatureHumidity::onService, this));
-        pub_noise_hum_ = std::make_unique<ros::Publisher>(
-            node_handle_->advertise<whi_interfaces::WhiNoise>("noise", 1));
-        service_noise_ = std::make_unique<ros::ServiceServer>(
-            node_handle_->advertiseService("noise", &TemperatureHumidity::onServiceNoise, this));
+        node_handle_->declare_parameter("loop_duration_temp", 10.0);
+        node_handle_->declare_parameter("loop_duration_decibel", 10.0);
+        node_handle_->get_parameter("loop_duration_temp", loop_duration_);
+        node_handle_->get_parameter("loop_duration_decibel", loop_duration_decibel_);
+        
+        auto updateFreq = std::chrono::duration<double>(loop_duration_);
+        auto updateFreq_decibel = std::chrono::duration<double>(loop_duration_decibel_);
+        
+        non_temp_loop_ = node_handle_->create_wall_timer(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(updateFreq),
+            std::bind(&TemperatureHumidity::update, this));
+        non_decibel_loop_ = node_handle_->create_wall_timer(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(updateFreq_decibel),
+            std::bind(&TemperatureHumidity::update_decibel, this));
+            
+        pub_temp_hum_ = node_handle_->create_publisher<whi_interfaces::msg::WhiTemperatureHumidity>(
+            "temperature_humidity", 1);
+        service_ = node_handle_->create_service<whi_interfaces::srv::WhiSrvTemperatureHumidity>(
+            "temperature_humidity", 
+            std::bind(&TemperatureHumidity::onService, this, std::placeholders::_1, std::placeholders::_2));
+        pub_decibel_hum_ = node_handle_->create_publisher<whi_interfaces::msg::WhiDecibel>(
+            "decibel", 1);
+        service_decibel_ = node_handle_->create_service<whi_interfaces::srv::WhiSrvDecibel>(
+            "decibel", 
+            std::bind(&TemperatureHumidity::onServiceDecibel, this, std::placeholders::_1, std::placeholders::_2));
     }
 
-    void TemperatureHumidity::update(const ros::TimerEvent& Event)
+    void TemperatureHumidity::update()
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        elapsed_time_ = ros::Duration(Event.current_real - Event.last_real);
+        static auto last_time = node_handle_->now();
+        auto current_time = node_handle_->now();
+        elapsed_time_ = current_time - last_time;
+        last_time = current_time;
 
-        whi_interfaces::WhiTemperatureHumidity msg;
-        double temperature = 0.0, humidity = 0.0;
-        bool result = sensor_->getValues(temperature, humidity,"request_temp");
+        whi_interfaces::msg::WhiTemperatureHumidity msg;
+        double temperature = 0.0, humidity = 0.0, pm25 = 0.0; 
+        bool result = sensor_->getValues(temperature, humidity, pm25, "request_temp");
         if (result)
         {
-            msg.header.stamp = ros::Time::now();
+            msg.header.stamp = node_handle_->now();
             msg.temperature = temperature;
             msg.humidity = humidity;
+            msg.pm25 = pm25;
         }
 
         pub_temp_hum_->publish(msg);
     }
 
-    void TemperatureHumidity::update_noise(const ros::TimerEvent& Event)
+    void TemperatureHumidity::update_decibel()
     {
+        // 暂时不用这个分贝传感器
+        return ;
         std::lock_guard<std::mutex> lock(mutex_);
-        whi_interfaces::WhiNoise msg;
-        double noise = 0.0;
-        double noise_have = 0.0;
-        bool result = sensor_->getValues(noise,noise_have,"request_noise");
+        whi_interfaces::msg::WhiDecibel msg;
+        double decibel = 0.0;
+        double decibel_have = 0.0;
+        double unused_pm25 = 0.0;  // 添加占位参数
+        bool result = sensor_->getValues(decibel, decibel_have, unused_pm25, "request_decibel");
         if (result)
         {
-            msg.header.stamp = ros::Time::now();
-            msg.noise = noise;
+            msg.header.stamp = node_handle_->now();
+            msg.decibel = decibel;
         }
 
-        pub_noise_hum_->publish(msg);
+        pub_decibel_hum_->publish(msg);
     }
 
-    bool TemperatureHumidity::onService(whi_interfaces::WhiSrvTemperatureHumidity::Request& Request,
-        whi_interfaces::WhiSrvTemperatureHumidity::Response& Response)
+    void TemperatureHumidity::onService(const std::shared_ptr<whi_interfaces::srv::WhiSrvTemperatureHumidity::Request> Request,
+        std::shared_ptr<whi_interfaces::srv::WhiSrvTemperatureHumidity::Response> Response)
     {
-        ROS_INFO_STREAM("request on service temp");
+        RCLCPP_INFO_STREAM(node_handle_->get_logger(), "request on service temp");
         std::vector<double> temp_humidity;
-        temp_humidity.resize(2);
+        temp_humidity.resize(3);
         bool result = sensor_->getServiceValues(temp_humidity, "temp");
         if (result)
         {
-            Response.temperature_humidity.header.stamp = ros::Time::now();
-            Response.temperature_humidity.temperature = temp_humidity[0];
-            Response.temperature_humidity.humidity = temp_humidity[1];
-            Response.result = true;
+            Response->temperature_humidity.header.stamp = node_handle_->now();
+            Response->temperature_humidity.temperature = temp_humidity[0];
+            Response->temperature_humidity.humidity = temp_humidity[1];
+            Response->temperature_humidity.pm25 = temp_humidity[2];
+            Response->result = true;
         }
         else
         {
-            ROS_INFO("requested error");
-            Response.result = false;
+            RCLCPP_INFO(node_handle_->get_logger(), "requested error");
+            Response->result = false;
         }
-
-        return Response.result;
     }
 
-    bool TemperatureHumidity::onServiceNoise(whi_interfaces::WhiSrvNoise::Request& Request,
-        whi_interfaces::WhiSrvNoise::Response& Response)
+    void TemperatureHumidity::onServiceDecibel(const std::shared_ptr<whi_interfaces::srv::WhiSrvDecibel::Request> Request,
+        std::shared_ptr<whi_interfaces::srv::WhiSrvDecibel::Response> Response)
     {
-        ROS_INFO_STREAM("request on service noise");
-        std::vector<double> noise;
-        noise.resize(1);
-        bool result = sensor_->getServiceValues(noise, "noise");
+        RCLCPP_INFO_STREAM(node_handle_->get_logger(), "request on service decibel");
+        std::vector<double> decibel;
+        decibel.resize(1);
+        bool result = sensor_->getServiceValues(decibel, "decibel");
         if (result)
         {
-            Response.noise_msg.header.stamp = ros::Time::now();
-            Response.noise_msg.noise = noise[0];
-            Response.result = true;
+            Response->decibel_msg.header.stamp = node_handle_->now();
+            Response->decibel_msg.decibel = decibel[0];
+            Response->result = true;
         }
         else
         {
-            ROS_INFO("requested error");
-            Response.result = false;
+            RCLCPP_INFO(node_handle_->get_logger(), "requested error");
+            Response->result = false;
         }
-
-        return Response.result;
     }
 
 } // namespace whi_temperature_humidity

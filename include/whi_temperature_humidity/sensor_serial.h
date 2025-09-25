@@ -28,12 +28,12 @@ namespace whi_temperature_humidity
 	{
     public:
         SensorSerial() = delete;
-        SensorSerial(std::shared_ptr<ros::NodeHandle> NodeHandle);
+        SensorSerial(std::shared_ptr<rclcpp::Node> NodeHandle);
         virtual ~SensorSerial();
 
     public:
         void parseProtocol(const std::string& ProtocolConfig) override;
-        bool getValues(double& Temperature, double& Humidity, std::string Param) override;
+        bool getValues(double& Temperature, double& Humidity, double& Pm25, std::string Param) override;
         bool getServiceValues(std::vector<double> & valuesVec, std::string Param) override;
 
     protected:
@@ -45,8 +45,9 @@ namespace whi_temperature_humidity
 	    std::string serial_port_;
 	    int baudrate_{ 4800 };
         std::unique_ptr<serial::Serial> serial_inst_{ nullptr };
-        double temp_noise_{ 0.0 };
+        double temp_decibel_{ 0.0 };
         double humidity_{ 0.0 };
+        double pm25_{ 0.0 };
         std::map<uint8_t, std::vector<double>> values_map_;
         uint8_t addr_{ 0x01 };
 	};

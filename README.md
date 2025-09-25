@@ -21,9 +21,9 @@ Publishes the values of temperature and humidity
 
 ## Configure params
 ```
-loop_duration: 4 # Hz
-protocol_config: /home/nvidia/catkin_workspace/src/whi_temperature_humidity/config/serial_protocol.yaml
+loop_duration: 4.0 # Hz
+protocol_config: /home/ros2_ws/catkin_workspace/src/whi_temperature_humidity/config/serial_protocol.yaml
 port: /dev/ttyUART_485_2
-baudrate: 4800
+baudrate: 9600
 device_addr: 0x01
 ```

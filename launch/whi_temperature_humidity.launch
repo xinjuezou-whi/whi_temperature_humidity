@@ -1,8 +1,0 @@
-<?xml version="1.0"?>
-<launch>
-
-  <!-- hardware interface -->
-  <node name="whi_temperature_humidity" pkg="whi_temperature_humidity" type="whi_temperature_humidity_node" output="screen" >
-    <rosparam file="$(find whi_temperature_humidity)/config/config.yaml" command="load"  />
-  </node>
-</launch>
