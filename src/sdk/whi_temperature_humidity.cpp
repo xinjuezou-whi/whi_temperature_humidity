@@ -100,10 +100,10 @@ namespace whi_temperature_humidity
         staMsg.level = whi_interfaces::msg::WhiState::INFO;
         diagnostic_msgs::msg::KeyValue value;
         value.key = "temperature";
-        value.value = toStringWithPrecision(msg.temperature, 2);
+        value.value = toStringWithPrecision(msg.temperature, 1);
         staMsg.values.push_back(value);
         value.key = "humidity";
-        value.value = toStringWithPrecision(msg.humidity, 2);
+        value.value = toStringWithPrecision(msg.humidity, 1);
         staMsg.values.push_back(value);
     
         pub_state_->publish(staMsg);
