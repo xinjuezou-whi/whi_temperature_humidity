@@ -20,6 +20,7 @@ Changelog:
 #include <whi_interfaces/srv/whi_srv_temperature_humidity.hpp>
 #include <whi_interfaces/msg/whi_decibel.hpp>
 #include <whi_interfaces/srv/whi_srv_decibel.hpp>
+#include <whi_interfaces/msg/whi_state.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <memory>
@@ -53,9 +54,9 @@ namespace whi_temperature_humidity
         double loop_duration_decibel_{ 10.0 };
         std::shared_ptr<SensorBase> sensor_{ nullptr };
         std::shared_ptr<rclcpp::Publisher<whi_interfaces::msg::WhiTemperatureHumidity>> pub_temp_hum_{ nullptr };
-        std::shared_ptr<rclcpp::Service<whi_interfaces::srv::WhiSrvTemperatureHumidity>> service_{ nullptr };
-           
         std::shared_ptr<rclcpp::Publisher<whi_interfaces::msg::WhiDecibel>> pub_decibel_hum_{ nullptr };
+        rclcpp::Publisher<whi_interfaces::msg::WhiState>::SharedPtr pub_state_{ nullptr };
+        std::shared_ptr<rclcpp::Service<whi_interfaces::srv::WhiSrvTemperatureHumidity>> service_{ nullptr };
         std::shared_ptr<rclcpp::Service<whi_interfaces::srv::WhiSrvDecibel>> service_decibel_{ nullptr };
            
         std::mutex mutex_;

@@ -47,17 +47,30 @@ namespace whi_temperature_humidity
         non_decibel_loop_ = node_handle_->create_wall_timer(
             std::chrono::duration_cast<std::chrono::nanoseconds>(updateFreq_decibel),
             std::bind(&TemperatureHumidity::update_decibel, this));
-            
+        
+        // publisher
         pub_temp_hum_ = node_handle_->create_publisher<whi_interfaces::msg::WhiTemperatureHumidity>(
             "temperature_humidity", 1);
+        pub_decibel_hum_ = node_handle_->create_publisher<whi_interfaces::msg::WhiDecibel>(
+            "decibel", 1);
+        // whi_state publisher
+        pub_state_ = node_handle_->create_publisher<whi_interfaces::msg::WhiState>("whi_state", 10);
+        // service
         service_ = node_handle_->create_service<whi_interfaces::srv::WhiSrvTemperatureHumidity>(
             "temperature_humidity", 
             std::bind(&TemperatureHumidity::onService, this, std::placeholders::_1, std::placeholders::_2));
-        pub_decibel_hum_ = node_handle_->create_publisher<whi_interfaces::msg::WhiDecibel>(
-            "decibel", 1);
         service_decibel_ = node_handle_->create_service<whi_interfaces::srv::WhiSrvDecibel>(
             "decibel", 
             std::bind(&TemperatureHumidity::onServiceDecibel, this, std::placeholders::_1, std::placeholders::_2));
+    }
+
+    template <typename T>
+    std::string toStringWithPrecision(const T Value, const int Digits = 6)
+    {
+        std::ostringstream out;
+        out.precision(Digits);
+        out << std::fixed << Value;
+        return out.str();
     }
 
     void TemperatureHumidity::update()
@@ -80,6 +93,20 @@ namespace whi_temperature_humidity
         }
 
         pub_temp_hum_->publish(msg);
+
+        whi_interfaces::msg::WhiState staMsg;
+        staMsg.header.stamp = current_time;
+        staMsg.hardware_id = "whi_temperature_humidity";
+        staMsg.level = whi_interfaces::msg::WhiState::INFO;
+        diagnostic_msgs::msg::KeyValue value;
+        value.key = "temperature";
+        value.value = toStringWithPrecision(msg.temperature, 2);
+        staMsg.values.push_back(value);
+        value.key = "humidity";
+        value.value = toStringWithPrecision(msg.humidity, 2);
+        staMsg.values.push_back(value);
+    
+        pub_state_->publish(staMsg);
     }
 
     void TemperatureHumidity::update_decibel()
