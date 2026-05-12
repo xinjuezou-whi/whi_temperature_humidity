@@ -14,7 +14,3 @@ static_commands:
     variables: { 0: 'device_addr' }
     base_addr: 0x00
     absolute_base: false
-feedbacks:
-  - param: state
-    base_addr: 0x00
-    absolute_base: false  
