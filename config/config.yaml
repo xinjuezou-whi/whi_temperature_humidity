@@ -2,7 +2,11 @@ whi_temperature_humidity:
   ros__parameters:
     loop_duration_temp: 4.0  # seconds
     loop_duration_noise: 3.0
-    protocol_config: "/home/nvidia/ros2_ws/src/whi_temperature_humidity/config/serial_protocol.yaml"
-    port: "/dev/ttyUART_485_2"
-    baudrate: 9600
-
+    protocol_config: /home/nvidia/ros2_humble_ws/src/whi_temperature_humidity/config/serial_protocol.yaml
+    device_addr: 0x03
+    modbus_instance: server_depend # stand_alone
+    server_depend:
+      modbus_service: modbus_request
+    stand_alone:
+      port: /dev/ttyUART_485_1
+      baudrate: 115200

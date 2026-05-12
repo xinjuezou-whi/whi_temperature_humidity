@@ -6,13 +6,16 @@ Features:
 - xxx
 
 Written by Yue Zhou, sevendull@163.com
+Refactored by Xinjue Zou, xinjue.zou.whi@gmail.com
 
-GNU General Public License, check LICENSE for more information.
+Apache License Version 2.0, check LICENSE for more information.
 All text above must be included in any redistribution.
 
 Changelog:
 2024-12-30: Initial version
 2025-07-25: Migrate from ROS 1 by Yuhang Su
+2026-05-11: Refactored with modbus server
+2026-xx-xx: xxx
 ******************************************************************/
 #include <iostream>
 #include <signal.h>
@@ -34,7 +37,7 @@ void signalHandler(int Signal)
 int main(int argc, char** argv)
 {
 	/// node version and copyright announcement
-	std::cout << "\nWHI temperature and humidity sensor VERSION 02.02.3" << std::endl;
+	std::cout << "\nWHI temperature and humidity sensor VERSION 02.03.1" << std::endl;
 	std::cout << "Copyright © 2023-2026 Wheel Hub Intelligent Co.,Ltd. All rights reserved\n" << std::endl;
 
 	/// ros infrastructure

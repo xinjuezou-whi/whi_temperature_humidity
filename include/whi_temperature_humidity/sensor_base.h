@@ -6,13 +6,15 @@ Features:
 - xxx
 
 Written by Yue Zhou, sevendull@163.com
+Refactored by Xinjue Zou, xinjue.zou.whi@gmail.com
 
-GNU General Public License, check LICENSE for more information.
+Apache License Version 2.0, check LICENSE for more information.
 All text above must be included in any redistribution.
 
 Changelog:
 2024-12-30: Initial version
-2025-xx-xx: xxx
+2026-05-12: Refactor
+2026-xx-xx: xxx
 ******************************************************************/
 #pragma once
 #include <rclcpp/rclcpp.hpp>
@@ -31,8 +33,9 @@ namespace whi_temperature_humidity
 
     public:
         virtual void parseProtocol(const std::string& ProtocolConfig) = 0;
-        virtual bool getValues(double& Temperature, double& Humidity, double& Pm25, std::string Param) = 0;
-        virtual bool getServiceValues(std::vector<double> & valuesVec, std::string Param) = 0;
+        virtual bool request(const std::string& Param) = 0;
+        virtual bool acquireValues() = 0;
+        virtual void getValues(double& Temperature, double& Humidity, double& Pm25) = 0;
 
     protected:
         std::shared_ptr<rclcpp::Node> node_handle_{ nullptr };

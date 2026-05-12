@@ -7,8 +7,9 @@ Features:
 
 
 Written by Yue Zhou, sevendull@163.com
+Refactored by Xinjue Zou, xinjue.zou.whi@gmail.com
 
-GNU General Public License, check LICENSE for more information.
+Apache License Version 2.0, check LICENSE for more information.
 All text above must be included in any redistribution.
 
 ******************************************************************/
@@ -65,44 +66,29 @@ namespace whi_temperature_humidity
         return crc;
     }
 
-    static int hexToString(const std::vector<uint8_t> &vec) 
-    {
-        std::ostringstream oss;
-        // 遍历vector并以16进制格式添加到sstream中
-        for (size_t i = 0; i < vec.size(); ++i)
-        {
-            if (i != 0)
-            {
-                oss << " ";
-            }
-            // 设置为以16进制输出，填充0，确保至少两位数，以及设置宽度
-            oss << "0x" << std::setw(2)
-                << std::setfill('0')     
-                << std::hex              
-                << static_cast<int>(vec[i]);
-        }
-        std::string result = oss.str();
-#ifdef DEBUG
-        // 注意：这里需要一个有效的node_handle指针，建议在类方法中调用
-        // RCLCPP_INFO(node_handle_->get_logger(), "send data is : %s", result.c_str());
-        std::cout << "send data is : " << result << std::endl;
-#endif
-        return 0;
-    }
-
-    static char decimalToHexChar(int decimal)
-    {
-        std::stringstream ss;
-        ss << std::hex << decimal;
-        std::string hexStr = ss.str();
-        int value = std::stoi(hexStr, 0, 16);
-        return static_cast<char>(value);
-    }
-
-    SensorSerial::SensorSerial(std::shared_ptr<rclcpp::Node> NodeHandle)
+    SensorSerial::SensorSerial(std::shared_ptr<rclcpp::Node> NodeHandle,
+        const std::string& Port, int Baudrate, int DeviceAddr)
         : SensorBase(NodeHandle)
+        , serial_port_(Port), baudrate_(Baudrate), device_addr_(DeviceAddr)
     {
-        init();
+        // serial
+	    try
+	    {
+		    serial_inst_ = std::make_unique<serial::Serial>(serial_port_, baudrate_, serial::Timeout::simpleTimeout(500));
+            RCLCPP_INFO_STREAM(node_handle_->get_logger(), "init,  device: " << serial_port_);
+	    }
+	    catch (serial::IOException& e)
+	    {
+		    RCLCPP_FATAL_STREAM(node_handle_->get_logger(), "failed to open serial " << serial_port_);
+	    }
+    }
+
+    SensorSerial::SensorSerial(std::shared_ptr<rclcpp::Node> NodeHandle,
+        int DeviceAddr, const std::string& Service)
+        : SensorBase(NodeHandle)
+        , device_addr_(DeviceAddr)
+    {
+        modbus_client_ = node_handle_->create_client<whi_interfaces::srv::WhiSrvModBus>(Service);
     }
 
     SensorSerial::~SensorSerial()
@@ -113,35 +99,6 @@ namespace whi_temperature_humidity
 	    }
     }
 
-    void SensorSerial::init()
-    {
-        // params
-        node_handle_->declare_parameter("port", std::string("/dev/ttyUSB0"));
-        node_handle_->declare_parameter("baudrate", 9600);
-        node_handle_->declare_parameter("device_addr", 1);
-        
-        node_handle_->get_parameter("port", serial_port_);
-        node_handle_->get_parameter("baudrate", baudrate_);
-        int device;
-        node_handle_->get_parameter("device_addr", device);
-
-        // serial
-	    try
-	    {
-		    serial_inst_ = std::make_unique<serial::Serial>(serial_port_, baudrate_, serial::Timeout::simpleTimeout(500));
-            RCLCPP_INFO_STREAM(node_handle_->get_logger(), "init,  device: " << serial_port_);
-            values_map_[0x01].push_back(0.0);
-            values_map_[0x01].push_back(0.0);
-            values_map_[0x01].push_back(0.0); // pm25
-            values_map_[0x02].push_back(0.0);
-	    }
-	    catch (serial::IOException& e)
-	    {
-		    RCLCPP_FATAL_STREAM(node_handle_->get_logger(), "failed to open serial " << serial_port_);
-	    }
-
-    }
-
     void SensorSerial::parseProtocol(const std::string& ProtocolConfig)
     {
         RCLCPP_INFO(node_handle_->get_logger(), "parsing prototocol");
@@ -149,132 +106,193 @@ namespace whi_temperature_humidity
         protocol_->parseProtocol(ProtocolConfig);
     }
 
-    bool SensorSerial::getValues(double& Temperature, double& Humidity, double& Pm25, std::string Param)
+    bool SensorSerial::request(const std::string& Param)
     {
-        std::vector<uint8_t> data;
-        bool result = false;
         if (protocol_->static_commands_map_)
         {
-            if (auto cmd_iter = protocol_->static_commands_map_->find(Param); cmd_iter == protocol_->static_commands_map_->end())
+            if (auto found = protocol_->static_commands_map_->find(Param); found == protocol_->static_commands_map_->end())
             {
                 RCLCPP_INFO_STREAM(node_handle_->get_logger(), "request param is not exist, param: " << Param);
                 return false;
             }
-            data = protocol_->static_commands_map_->at(Param).data_;
-            addr_ = data[0];
-            uint16_t crc = crc16(data.data(), data.size());
-            data.push_back(crc);
-            data.push_back(uint8_t(crc >> 8));
-            hexToString(data);
+
+            std::vector<uint8_t> data = protocol_->static_commands_map_->at(Param).data_;
+
             if (serial_inst_)
             {
-                serial_inst_->write(data.data(), data.size());
-            }
-
-            if (protocol_->feedbacks_map_)
-            {
-                int tryCount = 0;
-                const int MAX_TRY_COUNT = 3;
-                size_t count = 0;
-                if (serial_inst_)
+                if (protocol_->static_commands_map_->at(Param).variables_map_.empty())
                 {
-                    while ((count = serial_inst_->available()) <= 0 && tryCount++ < MAX_TRY_COUNT)
+                    device_addr_ = data[0];
+                    uint16_t crc = crc16(data.data(), data.size());
+                    data.push_back(crc);
+                    data.push_back(uint8_t(crc >> 8));
+                }
+                else
+                {
+                    for (const auto& variable : protocol_->static_commands_map_->at(Param).variables_map_)
                     {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                    }
-                    
-                    if (tryCount < MAX_TRY_COUNT)
-                    {
-                        unsigned char rbuff[count];
-                        size_t readNum = serial_inst_->read(rbuff, count);
-                        if (count > 2 && addr_ == rbuff[0] && readNum >= 19)
+                        if (variable.first == "device_addr")
                         {
-                            uint16_t crc = crc16(rbuff, readNum - 2);
-                            uint16_t readCrc = rbuff[readNum - 2] | uint16_t(rbuff[readNum - 1] << 8);
-                            if (crc == readCrc)
-                            {
-                                std::ostringstream oss;
-                                // 遍历vector并以16进制格式添加到sstream中
-                                for (size_t i = 0; i < readNum; ++i)
-                                {
-                                    if (i != 0)
-                                    {
-                                        oss << " ";
-                                    }
-                                    // 设置为以16进制输出，填充0，确保至少两位数，以及设置宽度
-                                    oss << "0x" << std::setw(2)
-                                        << std::setfill('0')     
-                                        << std::hex              
-                                        << static_cast<int>(rbuff[i]);
-                                }
+                            data[variable.second] = device_addr_;
+                        }
+                    }
+                    uint16_t crc = crc16(data.data(), data.size());
+                    data.push_back(crc);
+                    data.push_back(uint8_t(crc >> 8));
+                }
 #ifdef DEBUG
-                                std::string getstr = oss.str();     
-                                RCLCPP_INFO(node_handle_->get_logger(), "getstr is %s", getstr.c_str());
+    std::cout << "write data:" << std::endl;
+    for (const auto& it : data)
+    {
+        std::cout << std::hex << int(it) << ",";
+    }
+    std::cout << std::endl;
 #endif
-                                values_map_[addr_].clear();
-                                //values_map_[addr_].resize(2);
-                                if (rbuff[0] == addr_)
-                                {
-                                    uint16_t tempI, humidityI, pm25I;
-                                    tempI = (rbuff[3] << 8) | rbuff[4];
-                                    humidityI = (rbuff[5] << 8) | rbuff[6];
-                                    pm25I = (rbuff[17] << 8) | rbuff[18];  // PM2.5在第17-18字节
-                                    auto tempBin = decimalToBinary2(tempI);
-                                    int gettemp = complementToDecimal(tempBin);
-                                    auto humidityBin = decimalToBinary2(humidityI);
-                                    int gethumidity = complementToDecimal(humidityBin);
-                                    // PM2.5数据转换：根据手册，PM2.5直接使用寄存器值，单位ug/m3
-                                    auto pm25Bin = decimalToBinary2(pm25I);
-                                    int getPm25 = complementToDecimal(pm25Bin);
-                                    Temperature = float(gettemp - 2000) / 100.0;
-                                    Humidity = float(gethumidity) / 100.0;
-                                    Pm25 = float(getPm25);  // PM2.5直接使用，单位ug/m3
-                                    temp_decibel_ = Temperature;
-                                    humidity_ = Humidity;
-                                    pm25_ = Pm25;  // 需要在头文件中添加pm25_成员变量
-                                    result = true;
-                                    values_map_[addr_].push_back(temp_decibel_);
-                                    values_map_[addr_].push_back(humidity_);
-                                    values_map_[addr_].push_back(pm25_);  // 添加PM2.5到values_map_
-                                }
-                                else if (rbuff[0] == 0x02)
-                                {
-                                    int16_t noiseI;
-                                    noiseI = (rbuff[3] << 8) | rbuff[4];
-                                    Temperature = float(noiseI) / 10.0;
-                                    temp_decibel_ = Temperature;
-                                    values_map_[addr_].push_back(temp_decibel_);
-                                    result = true;
-                                }
-                            }
+
+                return serial_inst_->write(data.data(), data.size()) > 0;
+            }
+            else if (modbus_client_)
+            {
+                if (!protocol_->static_commands_map_->at(Param).variables_map_.empty())
+                {
+                    for (const auto& variable : protocol_->static_commands_map_->at(Param).variables_map_)
+                    {
+                        if (variable.first == "device_addr")
+                        {
+                            data[variable.second] = device_addr_;
                         }
                     }
                 }
-            }else
+
+                auto request = std::make_shared<whi_interfaces::srv::WhiSrvModBus::Request>();
+                request->instance.device = data[0];
+                request->instance.func = data[1];
+                request->instance.crc_size = 0;
+                request->instance.data = std::vector<uint8_t>(data.begin() + 2, data.end());
+#ifdef DEBUG
+    std::cout << "data send:" << std::endl;
+    for (const auto& it : data)
+    {
+        std::cout << std::hex << int(it) << ",";
+    }
+    std::cout << std::endl;
+#endif
+                
+                future_ = modbus_client_->async_send_request(request);
+
+                return true;
+            }
+            else
             {
-                result = true;
+                return false;
             }
         }
-
-        return result;
+        else
+        {
+            return false;
+        }
     }
 
-    bool SensorSerial::getServiceValues(std::vector<double> & valuesVec, std::string Param)
+    bool SensorSerial::acquireValues()
     {
-        if (Param == "temp")
+        if (serial_inst_)
         {
-            uint8_t addr = 0x01;
-            valuesVec[0] = values_map_[addr][0];
-            valuesVec[1] = values_map_[addr][1];
-            valuesVec[2] = values_map_[addr][2];
+            int tryCount = 0;
+            const int MAX_TRY_COUNT = 3;
+            size_t count = 0;
+            while ((count = serial_inst_->available()) <= 0 && tryCount++ < MAX_TRY_COUNT)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            }
+            
+            if (tryCount < MAX_TRY_COUNT)
+            {
+                unsigned char rbuff[count];
+                size_t readNum = serial_inst_->read(rbuff, count);
+                if (count > 2 && device_addr_ == rbuff[0] && readNum >= 19)
+                {
+                    uint16_t crc = crc16(rbuff, readNum - 2);
+                    uint16_t readCrc = rbuff[readNum - 2] | uint16_t(rbuff[readNum - 1] << 8);
+                    if (crc == readCrc)
+                    {
+                        if (rbuff[0] == device_addr_)
+                        {
+                            std::vector<uint8_t> raw(rbuff, rbuff + count);
+                            return parseValues(raw);
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
         }
-        else if (Param == "noise")
+        else if (modbus_client_)
         {
-            uint8_t addr = 0x02;
-            valuesVec[0] = values_map_[addr][0];
+            auto result = future_.get();
+            if (result->result)
+            {
+                return parseValues(future_.get()->data);
+            }
+            else
+            {
+                return false;
+            }
         }
+        else
+        {
+            return false;
+        }
+    }
 
-        return true;
+    void SensorSerial::getValues(double& Temperature, double& Humidity, double& Pm25)
+    {
+        std::lock_guard lk(data_mtx_);
+        Temperature = temperature_;
+        Humidity = humidity_;
+        Pm25 = pm25_;
+    }
+
+    bool SensorSerial::parseValues(const std::vector<uint8_t>& Raw)
+    {
+        if (Raw.size() > 18)
+        {
+            uint16_t tempI, humidityI, pm25I;
+            tempI = (Raw[3] << 8) | Raw[4];
+            humidityI = (Raw[5] << 8) | Raw[6];
+            pm25I = (Raw[17] << 8) | Raw[18];  // PM2.5在第17-18字节
+            auto tempBin = decimalToBinary2(tempI);
+            int gettemp = complementToDecimal(tempBin);
+            auto humidityBin = decimalToBinary2(humidityI);
+            int gethumidity = complementToDecimal(humidityBin);
+            // PM2.5数据转换：根据手册，PM2.5直接使用寄存器值，单位ug/m3
+            auto pm25Bin = decimalToBinary2(pm25I);
+            int getPm25 = complementToDecimal(pm25Bin);
+
+            std::unique_lock lk(data_mtx_);
+            temperature_ = float(gettemp - 2000) / 100.0;
+            humidity_ = float(gethumidity) / 100.0;
+            pm25_ = float(getPm25);  // PM2.5直接使用，单位ug/m3
+
+            return true;
+        }
+        else
+        {
+            return false;
+        }
     }
 
 } // namespace whi_temperature_humidity
